@@ -18,7 +18,7 @@ on:
       upload_release:
         description: 'Upload to release'
         type: boolean
-        default: false
+        default: true
 
 jobs:
   build:
@@ -55,7 +55,6 @@ jobs:
             sed -i 's/--without-gstreamer/--with-gstreamer/' build.sh
           fi
 
-          CURRENT=$(grep "^TERMUX_PKG_DEPENDS=" build.sh | head -1)
           EXTRA=""
           [ "${{ github.event.inputs.enable_gstreamer }}" = "true" ] && \
             EXTRA+=", gstreamer, gst-plugins-base, gst-plugins-good, gst-plugins-bad, gst-plugins-ugly, gst-libav"
@@ -66,10 +65,7 @@ jobs:
           EXTRA=$(echo "$EXTRA" | sed 's/^, //')
 
           if [ -n "$EXTRA" ]; then
-            NEW=$(echo "$CURRENT" | sed "s/xorg-xrandr/xorg-xrandr, ${EXTRA}/")
-            ESC_CUR=$(echo "$CURRENT" | sed 's/[[\.*^$()+?{|/\&]/\\&/g')
-            ESC_NEW=$(echo "$NEW" | sed 's/[[\.*^$()+?{|/\&]/g')
-            sed -i "s|${ESC_CUR}|${ESC_NEW}|" build.sh
+            sed -i "/^TERMUX_PKG_DEPENDS=/ s/xorg-xrandr/xorg-xrandr, ${EXTRA}/" build.sh
           fi
 
           bash -n build.sh
