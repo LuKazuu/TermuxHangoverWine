@@ -1,0 +1,134 @@
+name: Build Hangover Wine
+
+on:
+  workflow_dispatch:
+    inputs:
+      enable_gstreamer:
+        description: 'GStreamer + all plugins'
+        type: boolean
+        default: true
+      enable_ffmpeg:
+        description: 'FFmpeg codecs'
+        type: boolean
+        default: true
+      enable_gettext:
+        description: 'gettext (multi-language)'
+        type: boolean
+        default: true
+      upload_release:
+        description: 'Upload to release'
+        type: boolean
+        default: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Clone termux-packages
+        run: |
+          git clone --depth=1 https://github.com/termux/termux-packages.git
+
+      - name: Free up disk space
+        run: |
+          cd termux-packages
+          export CI=true
+          ./scripts/free-space.sh
+          df -h
+
+      - name: Modify build.sh
+        run: |
+          cd termux-packages/x11-packages/hangover-wine
+
+          if [ "${{ github.event.inputs.enable_ffmpeg }}" = "true" ]; then
+            sed -i 's/--without-ffmpeg/--with-ffmpeg/' build.sh
+          fi
+
+          if [ "${{ github.event.inputs.enable_gettext }}" = "true" ]; then
+            sed -i 's/--without-gettext/--with-gettext/' build.sh
+          fi
+
+          if [ "${{ github.event.inputs.enable_gstreamer }}" = "true" ]; then
+            sed -i 's/--without-gstreamer/--with-gstreamer/' build.sh
+          fi
+
+          CURRENT=$(grep "^TERMUX_PKG_DEPENDS=" build.sh | head -1)
+          EXTRA=""
+          [ "${{ github.event.inputs.enable_gstreamer }}" = "true" ] && \
+            EXTRA+=", gstreamer, gst-plugins-base, gst-plugins-good, gst-plugins-bad, gst-plugins-ugly, gst-libav"
+          [ "${{ github.event.inputs.enable_ffmpeg }}" = "true" ] && \
+            EXTRA+=", ffmpeg"
+          [ "${{ github.event.inputs.enable_gettext }}" = "true" ] && \
+            EXTRA+=", gettext"
+          EXTRA=$(echo "$EXTRA" | sed 's/^, //')
+
+          if [ -n "$EXTRA" ]; then
+            NEW=$(echo "$CURRENT" | sed "s/xorg-xrandr/xorg-xrandr, ${EXTRA}/")
+            ESC_CUR=$(echo "$CURRENT" | sed 's/[[\.*^$()+?{|/\&]/\\&/g')
+            ESC_NEW=$(echo "$NEW" | sed 's/[[\.*^$()+?{|/\&]/g')
+            sed -i "s|${ESC_CUR}|${ESC_NEW}|" build.sh
+          fi
+
+          bash -n build.sh
+
+      - name: Build package
+        run: |
+          cd termux-packages
+          sudo apt-get update && sudo apt-get install -y docker.io
+          sudo systemctl start docker || true
+          sudo docker pull ghcr.io/termux/package-builder:latest
+          sudo ./scripts/run-docker.sh ./build-package.sh -a aarch64 -I \
+            x11-packages/hangover-wine 2>&1 | tee build.log || {
+              tail -200 build.log
+              exit 1
+            }
+
+      - name: Collect packages
+        run: |
+          mkdir -p artifacts
+          find termux-packages -name "*.deb" -type f -exec cp {} artifacts/ \;
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hangover-wine-aarch64
+          path: artifacts/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload to release
+        if: github.event.inputs.upload_release == 'true' && success()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          WINE_VER=$(grep "^TERMUX_PKG_VERSION=" termux-packages/x11-packages/hangover-wine/build.sh | cut -d'"' -f2)
+          TAG="hangover-wine-${WINE_VER}-r${{ github.run_number }}"
+
+          cat > /tmp/notes.md << EOF
+          Hangover Wine ${WINE_VER}
+          - GStreamer: ${{ github.event.inputs.enable_gstreamer }}
+          - FFmpeg: ${{ github.event.inputs.enable_ffmpeg }}
+          - gettext: ${{ github.event.inputs.enable_gettext }}
+          - Arch: aarch64
+          EOF
+
+          gh release create "$TAG" --title "Hangover Wine ${WINE_VER}" \
+            --notes-file /tmp/notes.md --repo "${{ github.repository }}" || true
+          for deb in artifacts/*.deb; do
+            [ -f "$deb" ] && gh release upload "$TAG" "$deb" --repo "${{ github.repository }}" --clobber
+          done
+
+      - name: Summary
+        if: always()
+        run: |
+          WINE_VER=$(grep "^TERMUX_PKG_VERSION=" termux-packages/x11-packages/hangover-wine/build.sh | cut -d'"' -f2 || echo "Unknown")
+          echo "Version Detected: ${WINE_VER}"
+          echo "GStreamer: ${{ github.event.inputs.enable_gstreamer }}"
+          echo "FFmpeg: ${{ github.event.inputs.enable_ffmpeg }}"
+          echo "gettext: ${{ github.event.inputs.enable_gettext }}"
+          ls -lh artifacts/*.deb 2>/dev/null || echo "No .deb files"
