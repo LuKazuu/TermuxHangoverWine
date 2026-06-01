@@ -49,6 +49,8 @@ jobs:
 
           if [ "${{ github.event.inputs.enable_gettext }}" = "true" ]; then
             sed -i 's/--without-gettext/--with-gettext/' build.sh
+            sed -i '/--with-gettextpo=no/d' build.sh
+            sed -i "/^TERMUX_PKG_BUILD_DEPENDS=/ s/\"$/, gettext\"/" build.sh
           fi
 
           if [ "${{ github.event.inputs.enable_gstreamer }}" = "true" ]; then
@@ -69,6 +71,27 @@ jobs:
           fi
 
           bash -n build.sh
+
+      - name: Patch locale installation
+        if: github.event.inputs.enable_gettext == 'true'
+        run: |
+          python3 - << 'EOF'
+          with open('termux-packages/x11-packages/hangover-wine/build.sh', 'r') as f:
+              content = f.read()
+          mo_patch = (
+              '\tfor mo in po/*.mo; do\n'
+              '\t\tlang=$(basename "$mo" .mo)\n'
+              '\t\tinstall -Dm644 "$mo" \\\n'
+              '\t\t\t"$TERMUX_PREFIX/opt/hangover-wine/share/locale/$lang/LC_MESSAGES/wine.mo"\n'
+              '\tdone\n'
+          )
+          content = content.replace(
+              '\tchmod +x $TERMUX_PREFIX/bin/hangover-wine\n}',
+              '\tchmod +x $TERMUX_PREFIX/bin/hangover-wine\n\n' + mo_patch + '}'
+          )
+          with open('termux-packages/x11-packages/hangover-wine/build.sh', 'w') as f:
+              f.write(content)
+          EOF
 
       - name: Build package
         run: |
