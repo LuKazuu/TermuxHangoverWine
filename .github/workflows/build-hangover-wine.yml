@@ -11,10 +11,6 @@ on:
         description: 'FFmpeg (codecs)'
         type: boolean
         default: true
-      enable_gettext:
-        description: 'gettext (multi-lang)'
-        type: boolean
-        default: true
       upload_release:
         description: 'Release'
         type: boolean
@@ -47,24 +43,6 @@ jobs:
             sed -i 's/--without-ffmpeg/--with-ffmpeg/' build.sh
           fi
 
-          if [ "${{ github.event.inputs.enable_gettext }}" = "true" ]; then
-            sed -i 's/--without-gettext/--with-gettext/' build.sh
-            sed -i '/--with-gettextpo=no/d' build.sh
-            sed -i "/^TERMUX_PKG_BUILD_DEPENDS=/ s/\"$/, gettext\"/" build.sh
-            awk '
-              /chmod \+x \$TERMUX_PREFIX\/bin\/hangover-wine/ {
-                print
-                print ""
-                print "\tfor mo in po/*.mo; do"
-                print "\t\tlang=$(basename \"$mo\" .mo)"
-                print "\t\tinstall -Dm644 \"$mo\" \"$TERMUX_PREFIX/opt/hangover-wine/share/locale/$lang/LC_MESSAGES/wine.mo\""
-                print "\tdone"
-                next
-              }
-              { print }
-            ' build.sh > build.sh.tmp && mv build.sh.tmp build.sh
-          fi
-
           if [ "${{ github.event.inputs.enable_gstreamer }}" = "true" ]; then
             sed -i 's/--without-gstreamer/--with-gstreamer/' build.sh
           fi
@@ -74,8 +52,6 @@ jobs:
             EXTRA+=", gstreamer, gst-plugins-base, gst-plugins-good, gst-plugins-bad, gst-plugins-ugly, gst-libav"
           [ "${{ github.event.inputs.enable_ffmpeg }}" = "true" ] && \
             EXTRA+=", ffmpeg"
-          [ "${{ github.event.inputs.enable_gettext }}" = "true" ] && \
-            EXTRA+=", gettext"
           EXTRA=$(echo "$EXTRA" | sed 's/^, //')
 
           if [ -n "$EXTRA" ]; then
@@ -122,7 +98,6 @@ jobs:
           Hangover Wine ${WINE_VER}
           - GStreamer: ${{ github.event.inputs.enable_gstreamer }}
           - FFmpeg: ${{ github.event.inputs.enable_ffmpeg }}
-          - gettext: ${{ github.event.inputs.enable_gettext }}
           EOF
 
           gh release create "$TAG" --title "Hangover Wine ${WINE_VER}" \
@@ -138,5 +113,4 @@ jobs:
           echo "Version Detected: ${WINE_VER}"
           echo "GStreamer: ${{ github.event.inputs.enable_gstreamer }}"
           echo "FFmpeg: ${{ github.event.inputs.enable_ffmpeg }}"
-          echo "gettext: ${{ github.event.inputs.enable_gettext }}"
           ls -lh artifacts/*.deb 2>/dev/null || echo "No .deb files"
